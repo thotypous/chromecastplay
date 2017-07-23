@@ -4,7 +4,6 @@ import io
 import argparse
 import socket
 import curses
-import atexit
 import time
 import os
 from tempfile import NamedTemporaryFile
@@ -13,19 +12,17 @@ from subprocess import Popen, PIPE, DEVNULL
 import pychromecast
 import chardet
 from twisted.web import http
-from twisted.web.server import Site, Request
+from twisted.web.server import Site, Request, NOT_DONE_YET
 from twisted.web.resource import Resource
 from twisted.internet import reactor, endpoints
 from twisted.web.static import File, Data, NoRangeStaticProducer
+from twisted.python.compat import networkString
 
 
 VIDEO_PATH = 'video'
 SUB_PATH = 'sub'
-
 DEFAULT_MIME = 'video/mp4'
-
 TRANSCODER_BITRATE = '6000k'
-TRANSCODER_BUFSIZE = 60 << 20
 
 
 def to_webvtt(sub_file, video_file=None):
@@ -51,13 +48,19 @@ def detect_encoding(filename):
         return result['encoding']
 
 
-def serve(port, video_path, vtt_data, interface='', chunked=False):
-    fileFactory = ChunkedFile if chunked else File
+def serve(port, video_path, vtt_data, interface='',
+          chunked=False, transcode=False):
+    if transcode:
+        video = ChunkedPipe(get_transcoder(video_path))
+    elif chunked:
+        video = ChunkedFile(video_path,
+                            defaultType=DEFAULT_MIME)
+    else:
+        video = File(video_path, defaultType=DEFAULT_MIME)
+
     root = Resource()
-    root.putChild(SUB_PATH.encode('utf-8'),
-                  Data(vtt_data, 'text/vtt'))
-    root.putChild(VIDEO_PATH.encode('utf-8'),
-                  fileFactory(video_path, defaultType=DEFAULT_MIME))
+    root.putChild(SUB_PATH.encode('utf-8'), Data(vtt_data, 'text/vtt'))
+    root.putChild(VIDEO_PATH.encode('utf-8'), video)
     endpoint = endpoints.TCP4ServerEndpoint(reactor, port, interface=interface)
     endpoint.listen(Site(root, requestFactory=CORSRequest))
     reactor.run()
@@ -82,6 +85,25 @@ class ChunkedFile(File):
         return res
 
 
+class ChunkedPipe(ChunkedFile):
+    def __init__(self, fileForReading, defaultType=DEFAULT_MIME):
+        Resource.__init__(self)
+        self.fileForReading = fileForReading
+        self.type = self.defaultType = defaultType
+
+    def render_GET(self, request):
+        if request.method == b'HEAD':
+            self._setContentHeaders(request)
+            return b''
+        producer = self.makeProducer(request, self.fileForReading)
+        producer.start()
+        return NOT_DONE_YET
+
+    def _setContentHeaders(self, request, size=None):
+        if self.type:
+            request.setHeader(b'content-type', networkString(self.type))
+
+
 def get_src_ip_addr(dest_addr='8.8.8.8', dest_port=53):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect((dest_addr, dest_port))
@@ -96,10 +118,7 @@ def find_cast(friendly_name=None):
                 cc.device.friendly_name == friendly_name)
 
 
-def start_transcoder(infile):
-    tempfile = NamedTemporaryFile(suffix='.mp4', delete=False)
-    outfile = tempfile.name
-    atexit.register(lambda: os.remove(outfile))
+def get_transcoder(infile):
     transcoder = Popen(['ffmpeg',
                         '-y', '-nostdin',
                         '-i', infile,
@@ -108,26 +127,22 @@ def start_transcoder(infile):
                         '-frag_duration', '3000',
                         '-b:v', TRANSCODER_BITRATE,
                         '-loglevel', 'error',
-                        outfile])
-
-    while (os.path.getsize(outfile) < TRANSCODER_BUFSIZE and
-           transcoder.poll() is None):
-        time.sleep(1)
-
-    return transcoder, outfile
+                        '-'],
+                       stdout=PIPE)
+    return transcoder.stdout
 
 
-def play(cast, video_url, sub_url=None):
+def play(cast, video_url, sub_url=None, chunked=False):
     cast.wait()
     mc = cast.media_controller
     mc.play_media(video_url,
                   DEFAULT_MIME,
                   subtitles=sub_url)
     mc.block_until_active()
-    control_loop(cast, mc)
+    control_loop(cast, mc, chunked=chunked)
 
 
-def control_loop(cast, mc):
+def control_loop(cast, mc, chunked=False):
     # Based on https://github.com/stefanor/chromecastplayer
     stdscr = curses.initscr()
     curses.noecho()
@@ -150,13 +165,13 @@ def control_loop(cast, mc):
             elif c == ord('q'):
                 mc.stop()
                 break
-            elif c == curses.KEY_RIGHT:
+            elif c == curses.KEY_RIGHT and not chunked:
                 mc.seek(mc.status.current_time + 10)
-            elif c == curses.KEY_LEFT:
+            elif c == curses.KEY_LEFT and not chunked:
                 mc.seek(max(mc.status.current_time - 10, 0))
-            elif c == curses.KEY_PPAGE:
+            elif c == curses.KEY_PPAGE and not chunked:
                 mc.seek(mc.status.current_time + 60)
-            elif c == curses.KEY_NPAGE:
+            elif c == curses.KEY_NPAGE and not chunked:
                 mc.seek(max(mc.status.current_time - 60, 0))
             elif c == curses.KEY_UP:
                 cast.set_volume(min(cast.status.volume_level + 0.1, 1))
@@ -209,12 +224,9 @@ def main():
     ip = args.ip or get_src_ip_addr()
 
     video = args.video
-    chunked = args.chunked or args.transcode
+    transcode = args.transcode
+    chunked = args.chunked or transcode
     subtitles = to_webvtt(args.subtitles, video)
-    transcoder = None
-
-    if args.transcode:
-        transcoder, video = start_transcoder(video)
 
     base_url = 'http://{}:{}'.format(ip, port)
     video_url = '{}/{}'.format(base_url, VIDEO_PATH)
@@ -225,13 +237,11 @@ def main():
                            video,
                            subtitles,
                            ip,
-                           chunked))
+                           chunked,
+                           transcode))
     server.start()
-    play(cast, video_url, sub_url=sub_url)
-
+    play(cast, video_url, sub_url=sub_url, chunked=chunked)
     server.terminate()
-    if transcoder:
-        transcoder.kill()
 
 
 if __name__ == '__main__':
