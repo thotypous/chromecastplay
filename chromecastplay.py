@@ -22,7 +22,7 @@ from twisted.python.compat import networkString
 VIDEO_PATH = 'video'
 SUB_PATH = 'sub'
 DEFAULT_MIME = 'video/mp4'
-TRANSCODER_BITRATE = '6000k'
+DEFAULT_BITRATE = '6000k'
 
 
 def to_webvtt(sub_file, video_file=None):
@@ -49,9 +49,9 @@ def detect_encoding(filename):
 
 
 def serve(port, video_path, vtt_data, interface='',
-          chunked=False, transcode=False):
-    if transcode:
-        video = ChunkedPipe(get_transcoder(video_path))
+          chunked=False, transcode_bitrate=None):
+    if transcode_bitrate:
+        video = ChunkedPipe(get_transcoder(video_path, transcode_bitrate))
     elif chunked:
         video = ChunkedFile(video_path,
                             defaultType=DEFAULT_MIME)
@@ -118,14 +118,14 @@ def find_cast(friendly_name=None):
                 cc.device.friendly_name == friendly_name)
 
 
-def get_transcoder(infile):
+def get_transcoder(infile, video_bitrate):
     transcoder = Popen(['ffmpeg',
                         '-y', '-nostdin',
                         '-i', infile,
                         '-preset', 'ultrafast',
                         '-f', 'mp4',
                         '-frag_duration', '3000',
-                        '-b:v', TRANSCODER_BITRATE,
+                        '-b:v', video_bitrate,
                         '-loglevel', 'error',
                         '-'],
                        stdout=PIPE)
@@ -203,11 +203,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--video', required=True,
                         help='Video file')
-    parser.add_argument('-t', '--transcode', action='store_true',
-                        help='Transcode to mp4 using ffmpeg')
     parser.add_argument('-c', '--chunked', action='store_true',
-                        help='Stream using chunked-encoding '
-                             '(for incomplete files)')
+                        help='Unseekable stream using chunked-encoding '
+                        '(for incomplete files)')
+    parser.add_argument('-t', '--transcode', action='store_true',
+                        help='Transcode to mp4 using ffmpeg (implies -c)')
+    parser.add_argument('-b', '--bitrate',
+                        help='Video bitrate for transcoding (implies -t)')
     parser.add_argument('-s', '--subtitles',
                         help='Subtitle file (.vtt or .srt)')
     parser.add_argument('-p', '--port', type=int, default=7000,
@@ -224,8 +226,9 @@ def main():
     ip = args.ip or get_src_ip_addr()
 
     video = args.video
-    transcode = args.transcode
-    chunked = args.chunked or transcode
+    transcode = args.transcode or args.bitrate
+    chunked = transcode or args.chunked
+    transcode_bitrate = transcode and (args.bitrate or DEFAULT_BITRATE)
     subtitles = to_webvtt(args.subtitles, video)
 
     base_url = 'http://{}:{}'.format(ip, port)
@@ -238,7 +241,7 @@ def main():
                            subtitles,
                            ip,
                            chunked,
-                           transcode))
+                           transcode_bitrate))
     server.start()
     play(cast, video_url, sub_url=sub_url, chunked=chunked)
     server.terminate()
