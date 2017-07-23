@@ -12,10 +12,11 @@ from multiprocessing import Process
 from subprocess import Popen
 import pychromecast
 import chardet
+from twisted.web import http
 from twisted.web.server import Site, Request
 from twisted.web.resource import Resource
 from twisted.internet import reactor, endpoints
-from twisted.web.static import File, Data
+from twisted.web.static import File, Data, NoRangeStaticProducer
 
 
 VIDEO_PATH = 'video'
@@ -24,7 +25,7 @@ SUB_PATH = 'sub'
 DEFAULT_MIME = 'video/mp4'
 
 TRANSCODER_BITRATE = '6000k'
-TRANSCODER_BUFSIZE = 60000000
+TRANSCODER_BUFSIZE = 60 << 20
 
 
 def read_sub(filename):
@@ -62,8 +63,8 @@ def srt2vtt(contents):
                         (convert_cue(cue) for cue in cues)))
 
 
-def serve(port, video_path, vtt_data, interface='', growable=False):
-    fileFactory = GrowableFile if growable else File
+def serve(port, video_path, vtt_data, interface='', chunked=False):
+    fileFactory = ChunkedFile if chunked else File
     root = Resource()
     root.putChild(SUB_PATH.encode('utf-8'),
                   Data(vtt_data, 'text/vtt'))
@@ -80,14 +81,17 @@ class CORSRequest(Request):
         super().process()
 
 
-class GrowableFile(File):
-    def getsize(self):
-        self.restat()  # Invalidate cache
-        return super().getsize()
+class ChunkedFile(File):
+    def makeProducer(self, request, fileForReading):
+        self._setContentHeaders(request)
+        request.setResponseCode(http.OK)
+        return NoRangeStaticProducer(request, fileForReading)
 
-    def _contentRange(self, offset, size):
-        return b'bytes %d-%d/*' % (
-            offset, offset + size - 1)
+    def render_GET(self, request):
+        res = super().render_GET(request)
+        request.responseHeaders.removeHeader(b'accept-ranges')
+        request.responseHeaders.removeHeader(b'content-length')
+        return res
 
 
 def get_src_ip_addr(dest_addr='8.8.8.8', dest_port=53):
@@ -198,8 +202,9 @@ def main():
                         help='Video file')
     parser.add_argument('-t', '--transcode', action='store_true',
                         help='Transcode to mp4 using ffmpeg')
-    parser.add_argument('-g', '--growable', action='store_true',
-                        help='Use if file is not completely downloaded yet')
+    parser.add_argument('-c', '--chunked', action='store_true',
+                        help='Stream using chunked-encoding '
+                             '(for incomplete files)')
     parser.add_argument('-s', '--subtitles',
                         help='Subtitle file (.vtt or .srt)')
     parser.add_argument('-p', '--port', type=int, default=7000,
@@ -217,7 +222,7 @@ def main():
     subtitles = args.subtitles and read_sub(args.subtitles)
 
     video = args.video
-    growable = args.growable or args.transcode
+    chunked = args.chunked or args.transcode
     transcoder = None
 
     if args.transcode:
@@ -232,7 +237,7 @@ def main():
                            video,
                            subtitles,
                            ip,
-                           growable))
+                           chunked))
     server.start()
     play(cast, video_url, sub_url=sub_url)
 
