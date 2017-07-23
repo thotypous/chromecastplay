@@ -2,12 +2,65 @@ import argparse
 import socket
 import curses
 import time
+import re
+import itertools
 from multiprocessing import Process
 import pychromecast
+import chardet
 from twisted.web.server import Site, Request
 from twisted.web.resource import Resource
 from twisted.internet import reactor, endpoints
 from twisted.web.static import File, Data
+
+
+VIDEO_PATH = 'video'
+SUB_PATH = 'sub'
+
+
+def read_sub(filename):
+    contents = read_contents(filename)
+    if not filename.endswith('.vtt'):
+        # if extension is not .vtt, assume format is srt
+        contents = srt2vtt(contents)
+    return contents.encode('utf-8')
+
+
+def read_contents(filename):
+    with open(filename, 'rb') as f:
+        result = chardet.detect(f.read())
+        encoding = result['encoding']
+    with open(filename, 'rU', encoding=encoding) as f:
+        return f.read()
+
+
+def srt2vtt(contents):
+    def convert_cue(cue):
+        m = re.search(r'(\d+:\d+:\d+)(?:,(\d+))?\s*--?>'
+                      r'\s*(\d+:\d+:\d+)(?:,(\d+))?\s*(.*)',
+                      cue,
+                      re.DOTALL)
+        if m:
+            return '{}.{} --> {}.{}\n{}'\
+                   .format(m.group(1), m.group(2) or '000',
+                           m.group(3), m.group(4) or '000',
+                           m.group(5).strip())
+        return ''
+
+    cues = contents.split('\n\n')
+    return '\n\n'.join(
+        itertools.chain(['WEBVTT'],
+                        (convert_cue(cue) for cue in cues)))
+
+
+def serve(port, video_path, vtt_data, interface=''):
+    root = Resource()
+    root.putChild(SUB_PATH.encode('utf-8'),
+                  Data(vtt_data, 'text/vtt'))
+    root.putChild(VIDEO_PATH.encode('utf-8'),
+                  File(video_path, defaultType='video/webm'))
+    endpoint = endpoints.TCP4ServerEndpoint(reactor, port, interface=interface)
+    endpoint.listen(Site(root, requestFactory=CORSRequest))
+    reactor.run()
 
 
 class CORSRequest(Request):
@@ -23,28 +76,25 @@ def get_src_ip_addr(dest_addr='8.8.8.8', dest_port=53):
     return src_addr
 
 
-def serve(port, video_path, vtt_data, interface=''):
-    root = Resource()
-    root.putChild(b'sub',
-                  Data(vtt_data, 'text/vtt'))
-    root.putChild(b'video',
-                  File(video_path, defaultType='video/webm'))
-    endpoint = endpoints.TCP4ServerEndpoint(reactor, port, interface=interface)
-    endpoint.listen(Site(root, requestFactory=CORSRequest))
-    reactor.run()
+def find_cast(friendly_name=None):
+    chromecasts = pychromecast.get_chromecasts()
+    return next(cc for cc in chromecasts
+                if not friendly_name or
+                cc.device.friendly_name == friendly_name)
 
 
-def play(base_url):
-    cast = pychromecast.get_chromecasts()[0]
+def play(cast, video_url, sub_url=None):
     cast.wait()
     mc = cast.media_controller
-    mc.play_media('%s/video' % base_url, "video/webm")
+    mc.play_media(video_url,
+                  'video/webm',
+                  subtitles=sub_url)
     mc.block_until_active()
     control_loop(cast, mc)
 
 
 def control_loop(cast, mc):
-    # https://github.com/stefanor/chromecastplayer/blob/master/chromeplay.py
+    # Based on https://github.com/stefanor/chromecastplayer
     stdscr = curses.initscr()
     curses.noecho()
     curses.cbreak()
@@ -101,20 +151,35 @@ def control_loop(cast, mc):
 
 
 def main():
-    port = 7000
-    ip = None
-    video_path = 'video.mkv'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-v', '--video', required=True,
+                        help='Video file')
+    parser.add_argument('-s', '--subtitles',
+                        help='Subtitle file (.vtt or .srt)')
+    parser.add_argument('-p', '--port', type=int, default=7000,
+                        help='Port to listen')
+    parser.add_argument('-i', '--ip',
+                        help='IPv4 address to listen')
+    parser.add_argument('-d', '--device',
+                        help='ChromeCast device name')
+    args = parser.parse_args()
 
-    ip = ip or get_src_ip_addr()
-    base_url = 'http://%s:%d' % (ip, port)
+    cast = find_cast(friendly_name=args.device)
+
+    ip = args.ip or get_src_ip_addr()
+    subtitles = args.subtitles and read_sub(args.subtitles)
+
+    base_url = 'http://{}:{}'.format(ip, args.port)
+    video_url = '{}/{}'.format(base_url, VIDEO_PATH)
+    sub_url = subtitles and '{}/{}'.format(base_url, SUB_PATH)
 
     server = Process(target=serve,
-                     args=(port,
-                           video_path,
-                           b'',
+                     args=(args.port,
+                           args.video,
+                           subtitles,
                            ip))
     server.start()
-    play(base_url)
+    play(cast, video_url, sub_url=sub_url)
     server.terminate()
 
 
