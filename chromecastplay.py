@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 import itertools
+import io
 import argparse
 import socket
 import curses
 import atexit
 import time
-import re
 import os
 from tempfile import NamedTemporaryFile
 from multiprocessing import Process
-from subprocess import Popen
+from subprocess import Popen, PIPE, DEVNULL
 import pychromecast
 import chardet
 from twisted.web import http
@@ -28,39 +28,27 @@ TRANSCODER_BITRATE = '6000k'
 TRANSCODER_BUFSIZE = 60 << 20
 
 
-def read_sub(filename):
-    contents = read_contents(filename)
-    if not filename.endswith('.vtt'):
-        # if extension is not .vtt, assume format is srt
-        contents = srt2vtt(contents)
-    return contents.encode('utf-8')
+def to_webvtt(sub_file, video_file=None):
+    encoding = None
+    if sub_file:
+        encoding = detect_encoding(sub_file)
+    sub_transcoder = Popen(['ffmpeg',
+                            '-y', '-nostdin'] +
+                           (['-sub_charenc', encoding] if encoding else []) +
+                           ['-i', sub_file or video_file,
+                            '-map', 's?',
+                            '-f', 'webvtt',
+                            '-loglevel', 'error',
+                            '-'],
+                           stdout=PIPE,
+                           stderr=DEVNULL)
+    return sub_transcoder.stdout.read()
 
 
-def read_contents(filename):
+def detect_encoding(filename):
     with open(filename, 'rb') as f:
         result = chardet.detect(f.read())
-        encoding = result['encoding']
-    with open(filename, 'rU', encoding=encoding) as f:
-        return f.read()
-
-
-def srt2vtt(contents):
-    def convert_cue(cue):
-        m = re.search(r'(\d+:\d+:\d+)(?:,(\d+))?\s*--?>'
-                      r'\s*(\d+:\d+:\d+)(?:,(\d+))?\s*(.*)',
-                      cue,
-                      re.DOTALL)
-        if m:
-            return '{}.{} --> {}.{}\n{}'\
-                   .format(m.group(1), m.group(2) or '000',
-                           m.group(3), m.group(4) or '000',
-                           m.group(5).strip())
-        return ''
-
-    cues = contents.split('\n\n')
-    return '\n\n'.join(
-        itertools.chain(['WEBVTT'],
-                        (convert_cue(cue) for cue in cues)))
+        return result['encoding']
 
 
 def serve(port, video_path, vtt_data, interface='', chunked=False):
@@ -219,10 +207,10 @@ def main():
 
     port = args.port
     ip = args.ip or get_src_ip_addr()
-    subtitles = args.subtitles and read_sub(args.subtitles)
 
     video = args.video
     chunked = args.chunked or args.transcode
+    subtitles = to_webvtt(args.subtitles, video)
     transcoder = None
 
     if args.transcode:
