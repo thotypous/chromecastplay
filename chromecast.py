@@ -1,10 +1,15 @@
+#!/usr/bin/env python3
+import itertools
 import argparse
 import socket
 import curses
+import atexit
 import time
 import re
-import itertools
+import os
+from tempfile import NamedTemporaryFile
 from multiprocessing import Process
+from subprocess import Popen
 import pychromecast
 import chardet
 from twisted.web.server import Site, Request
@@ -15,6 +20,11 @@ from twisted.web.static import File, Data
 
 VIDEO_PATH = 'video'
 SUB_PATH = 'sub'
+
+DEFAULT_MIME = 'video/mp4'
+
+TRANSCODER_BITRATE = '6000k'
+TRANSCODER_BUFSIZE = 60000000
 
 
 def read_sub(filename):
@@ -52,12 +62,13 @@ def srt2vtt(contents):
                         (convert_cue(cue) for cue in cues)))
 
 
-def serve(port, video_path, vtt_data, interface=''):
+def serve(port, video_path, vtt_data, interface='', growable=False):
+    fileFactory = GrowableFile if growable else File
     root = Resource()
     root.putChild(SUB_PATH.encode('utf-8'),
                   Data(vtt_data, 'text/vtt'))
     root.putChild(VIDEO_PATH.encode('utf-8'),
-                  File(video_path, defaultType='video/webm'))
+                  fileFactory(video_path, defaultType=DEFAULT_MIME))
     endpoint = endpoints.TCP4ServerEndpoint(reactor, port, interface=interface)
     endpoint.listen(Site(root, requestFactory=CORSRequest))
     reactor.run()
@@ -67,6 +78,16 @@ class CORSRequest(Request):
     def process(self):
         self.setHeader(b'Access-Control-Allow-Origin', b'*')
         super().process()
+
+
+class GrowableFile(File):
+    def getsize(self):
+        self.restat()  # Invalidate cache
+        return super().getsize()
+
+    def _contentRange(self, offset, size):
+        return b'bytes %d-%d/*' % (
+            offset, offset + size - 1)
 
 
 def get_src_ip_addr(dest_addr='8.8.8.8', dest_port=53):
@@ -83,11 +104,32 @@ def find_cast(friendly_name=None):
                 cc.device.friendly_name == friendly_name)
 
 
+def start_transcoder(infile):
+    tempfile = NamedTemporaryFile(suffix='.mp4', delete=False)
+    outfile = tempfile.name
+    atexit.register(lambda: os.remove(outfile))
+    transcoder = Popen(['ffmpeg',
+                        '-y', '-nostdin',
+                        '-i', infile,
+                        '-preset', 'ultrafast',
+                        '-f', 'mp4',
+                        '-frag_duration', '3000',
+                        '-b:v', TRANSCODER_BITRATE,
+                        '-loglevel', 'error',
+                        outfile])
+
+    while (os.path.getsize(outfile) < TRANSCODER_BUFSIZE and
+           transcoder.poll() is None):
+        time.sleep(1)
+
+    return transcoder, outfile
+
+
 def play(cast, video_url, sub_url=None):
     cast.wait()
     mc = cast.media_controller
     mc.play_media(video_url,
-                  'video/webm',
+                  DEFAULT_MIME,
                   subtitles=sub_url)
     mc.block_until_active()
     control_loop(cast, mc)
@@ -154,6 +196,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--video', required=True,
                         help='Video file')
+    parser.add_argument('-t', '--transcode', action='store_true',
+                        help='Transcode to mp4 using ffmpeg')
+    parser.add_argument('-g', '--growable', action='store_true',
+                        help='Use if file is not completely downloaded yet')
     parser.add_argument('-s', '--subtitles',
                         help='Subtitle file (.vtt or .srt)')
     parser.add_argument('-p', '--port', type=int, default=7000,
@@ -166,21 +212,33 @@ def main():
 
     cast = find_cast(friendly_name=args.device)
 
+    port = args.port
     ip = args.ip or get_src_ip_addr()
     subtitles = args.subtitles and read_sub(args.subtitles)
 
-    base_url = 'http://{}:{}'.format(ip, args.port)
+    video = args.video
+    growable = args.growable or args.transcode
+    transcoder = None
+
+    if args.transcode:
+        transcoder, video = start_transcoder(video)
+
+    base_url = 'http://{}:{}'.format(ip, port)
     video_url = '{}/{}'.format(base_url, VIDEO_PATH)
     sub_url = subtitles and '{}/{}'.format(base_url, SUB_PATH)
 
     server = Process(target=serve,
-                     args=(args.port,
-                           args.video,
+                     args=(port,
+                           video,
                            subtitles,
-                           ip))
+                           ip,
+                           growable))
     server.start()
     play(cast, video_url, sub_url=sub_url)
+
     server.terminate()
+    if transcoder:
+        transcoder.kill()
 
 
 if __name__ == '__main__':
