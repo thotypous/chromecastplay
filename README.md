@@ -49,7 +49,7 @@ sudo apt install ffmpeg
 playback will abort before starting without any further notice. In this case,
 try the `-t` option presented below.
 
-### Play a video file encoded with a codec not supported by ChromeCast
+## Play a video file encoded with a codec not supported by ChromeCast
 
 ```bash
 ./chromecastplay.py -t -v videofile.mkv
