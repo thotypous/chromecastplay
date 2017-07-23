@@ -9,7 +9,7 @@ application for streaming video to a ChromeCast.
  * Embedded webserver for streaming local files to the ChromeCast.
  * Supports streaming incomplete files. Useful to watch a video still being download by Torrent, MEGA.nz or other means.
  * Optional real-time video transcoding when you need to play a video codec not [supported by ChromeCast](https://developers.google.com/cast/docs/media).
- * Supports subtitles supplied by an external file (e.g. SRT format) embedded in a video file (e.g. MKV format). Automatically converts [several subtitle formats](https://trac.ffmpeg.org/wiki/ExtractSubtitles) to the WebVTT format supported by ChromeCast.
+ * Supports subtitles supplied by an external file (e.g. SRT format) or embedded in a video file (e.g. MKV format). Automatically converts [several subtitle formats](https://trac.ffmpeg.org/wiki/ExtractSubtitles) to the WebVTT format supported by ChromeCast.
  * Allows the user to control video playback (seek, volume, pause and resume).
 
 
