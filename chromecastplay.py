@@ -129,17 +129,17 @@ def get_transcoder(infile, video_bitrate):
     return transcoder.stdout
 
 
-def play(cast, video_url, sub_url=None, chunked=False):
+def play(cast, video_url, sub_url=None, unseekable=False):
     cast.wait()
     mc = cast.media_controller
     mc.play_media(video_url,
                   DEFAULT_MIME,
                   subtitles=sub_url)
     mc.block_until_active()
-    control_loop(cast, mc, chunked=chunked)
+    control_loop(cast, mc, unseekable=unseekable)
 
 
-def control_loop(cast, mc, chunked=False):
+def control_loop(cast, mc, unseekable=False):
     # Based on https://github.com/stefanor/chromecastplayer
     stdscr = curses.initscr()
     curses.noecho()
@@ -162,13 +162,13 @@ def control_loop(cast, mc, chunked=False):
             elif c == ord('q'):
                 mc.stop()
                 break
-            elif c == curses.KEY_RIGHT and not chunked:
+            elif c == curses.KEY_RIGHT and not unseekable:
                 mc.seek(mc.status.current_time + 10)
-            elif c == curses.KEY_LEFT and not chunked:
+            elif c == curses.KEY_LEFT and not unseekable:
                 mc.seek(max(mc.status.current_time - 10, 0))
-            elif c == curses.KEY_PPAGE and not chunked:
+            elif c == curses.KEY_PPAGE and not unseekable:
                 mc.seek(mc.status.current_time + 60)
-            elif c == curses.KEY_NPAGE and not chunked:
+            elif c == curses.KEY_NPAGE and not unseekable:
                 mc.seek(max(mc.status.current_time - 60, 0))
             elif c == curses.KEY_UP:
                 cast.set_volume(min(cast.status.volume_level + 0.1, 1))
@@ -240,7 +240,7 @@ def main():
                            chunked,
                            transcode_bitrate))
     server.start()
-    play(cast, video_url, sub_url=sub_url, chunked=chunked)
+    play(cast, video_url, sub_url=sub_url, unseekable=chunked)
     server.terminate()
 
 
