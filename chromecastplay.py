@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 import itertools
-import io
 import argparse
 import socket
 import curses
 import time
-import os
-from tempfile import NamedTemporaryFile
 from multiprocessing import Process
 from subprocess import Popen, PIPE, DEVNULL
 import pychromecast
