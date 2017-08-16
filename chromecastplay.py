@@ -124,6 +124,8 @@ def get_transcoder(infile, video_bitrate):
                         '-frag_duration', '3000',
                         '-b:v', video_bitrate,
                         '-loglevel', 'error',
+                        '-vcodec', 'h264',
+                        '-acodec', 'aac',
                         '-'],
                        stdout=PIPE)
     return transcoder.stdout
