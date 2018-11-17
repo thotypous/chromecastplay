@@ -153,44 +153,47 @@ def control_loop(cast, mc, unseekable=False):
 
     try:
         while True:
-            c = stdscr.getch()
-            if c == curses.ERR:
-                time.sleep(1)
-            elif c == ord(' '):
-                if mc.status.player_state == 'PAUSED':
-                    mc.play()
-                else:
-                    mc.pause()
-            elif c == ord('q'):
-                mc.stop()
-                break
-            elif c == curses.KEY_RIGHT and not unseekable:
-                mc.seek(mc.status.current_time + 10)
-            elif c == curses.KEY_LEFT and not unseekable:
-                mc.seek(max(mc.status.current_time - 10, 0))
-            elif c == curses.KEY_PPAGE and not unseekable:
-                mc.seek(mc.status.current_time + 60)
-            elif c == curses.KEY_NPAGE and not unseekable:
-                mc.seek(max(mc.status.current_time - 60, 0))
-            elif c == curses.KEY_UP:
-                cast.set_volume(min(cast.status.volume_level + 0.1, 1))
-            elif c == curses.KEY_DOWN:
-                cast.set_volume(max(cast.status.volume_level - 0.1, 0))
-            if mc.status:
-                stdscr.addstr(0, 0, mc.status.player_state)
-                stdscr.clrtoeol()
-                minutes, seconds = divmod(mc.status.current_time, 60)
-                hours, minutes = divmod(minutes, 60)
-                stdscr.addstr(1, 0, "%02i:%02i:%02i"
-                                    % (hours, minutes, seconds))
-                idle_state = mc.status.player_state == 'IDLE'
-                if not idle_state:
-                    started = True
-                if started and idle_state:
+            try:
+                c = stdscr.getch()
+                if c == curses.ERR:
+                    time.sleep(1)
+                elif c == ord(' '):
+                    if mc.status.player_state == 'PAUSED':
+                        mc.play()
+                    else:
+                        mc.pause()
+                elif c == ord('q'):
+                    mc.stop()
                     break
-                mc.update_status()
-            stdscr.move(2, 0)
-            stdscr.refresh()
+                elif c == curses.KEY_RIGHT and not unseekable:
+                    mc.seek(mc.status.current_time + 10)
+                elif c == curses.KEY_LEFT and not unseekable:
+                    mc.seek(max(mc.status.current_time - 10, 0))
+                elif c == curses.KEY_PPAGE and not unseekable:
+                    mc.seek(mc.status.current_time + 60)
+                elif c == curses.KEY_NPAGE and not unseekable:
+                    mc.seek(max(mc.status.current_time - 60, 0))
+                elif c == curses.KEY_UP:
+                    cast.set_volume(min(cast.status.volume_level + 0.1, 1))
+                elif c == curses.KEY_DOWN:
+                    cast.set_volume(max(cast.status.volume_level - 0.1, 0))
+                if mc.status:
+                    stdscr.addstr(0, 0, mc.status.player_state)
+                    stdscr.clrtoeol()
+                    minutes, seconds = divmod(mc.status.current_time, 60)
+                    hours, minutes = divmod(minutes, 60)
+                    stdscr.addstr(1, 0, "%02i:%02i:%02i"
+                                        % (hours, minutes, seconds))
+                    idle_state = mc.status.player_state == 'IDLE'
+                    if not idle_state:
+                        started = True
+                    if started and idle_state:
+                        break
+                    mc.update_status()
+                stdscr.move(2, 0)
+                stdscr.refresh()
+            except pychromecast.error.UnsupportedNamespace:
+                pass
     finally:
         curses.nocbreak()
         stdscr.keypad(False)
