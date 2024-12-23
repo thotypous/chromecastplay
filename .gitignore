@@ -2,3 +2,4 @@
 *.wpu
 *.pyc
 *.pyo
+.vim

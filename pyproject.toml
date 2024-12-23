@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "chromecastplay"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+license = "ISC"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pychromecast = "^14.0.5"
+chardet = "^5.2.0"
+twisted = "^24.11.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

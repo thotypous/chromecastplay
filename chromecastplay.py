@@ -30,7 +30,7 @@ def to_webvtt(sub_file, video_file=None):
                             '-y', '-nostdin'] +
                            (['-sub_charenc', encoding] if encoding else []) +
                            ['-i', sub_file or video_file,
-                            '-map', 's?',
+                            '-map', '0:s:1',
                             '-f', 'webvtt',
                             '-loglevel', 'error',
                             '-'],
@@ -109,7 +109,7 @@ def get_src_ip_addr(dest_addr='8.8.8.8', dest_port=53):
 
 
 def find_cast(friendly_name=None):
-    chromecasts = pychromecast.get_chromecasts()
+    chromecasts, unused = pychromecast.get_chromecasts()
     return next(cc for cc in chromecasts
                 if not friendly_name or
                 cc.device.friendly_name == friendly_name)
