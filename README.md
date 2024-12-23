@@ -15,18 +15,9 @@ application for streaming video to a ChromeCast.
 
 # Prerequisites
 
-You need Python3 and pip:
-
+Use [Poetry](https://python-poetry.org):
 ```bash
-sudo apt install python3-minimal
-wget https://bootstrap.pypa.io/get-pip.py
-sudo -H python3 get-pip.py
-```
-
-You also need to install some required Python packages:
-
-```bash
-sudo -H python3 -m pip install -r pip-requirements.txt
+poetry install
 ```
 
 In order to use the subtitles and video transcoding features, you need to install [FFmpeg](http://www.ffmpeg.org):
@@ -41,7 +32,7 @@ sudo apt install ffmpeg
 ## Play a video file
 
 ```bash
-./chromecastplay.py -v videofile.mp4
+poetry run ./chromecastplay.py -v videofile.mp4
 ```
 
 **Note**: If the video file was encoded with a codec not
@@ -52,7 +43,7 @@ try the `-t` option presented below.
 ## Play a video file encoded with a codec not supported by ChromeCast
 
 ```bash
-./chromecastplay.py -t -v videofile.mkv
+poetry run ./chromecastplay.py -t -v videofile.mkv
 ```
 
 **Note**: When real-time transcoding is enabled, the video stream will
@@ -61,19 +52,19 @@ be unseekable.
 ## Play a video file with embedded subtitles
 
 ```bash
-./chromecastplay.py -v videofile.mkv
+poetry run ./chromecastplay.py -v videofile.mkv
 ```
 
 ## Play a video file with external subtitles
 
 ```bash
-./chromecastplay.py -v videofile.mp4 -s subtitles.srt
+poetry run ./chromecastplay.py -v videofile.mp4 -s subtitles.srt
 ```
 
 ## Play an incomplete video file (still being downloaded)
 
 ```bash
-./chromecastplay.py -c -v videofile.mkv
+poetry run ./chromecastplay.py -c -v videofile.mkv
 ```
 
 **Note**: When playing an incomplete file, the video stream will
@@ -84,7 +75,7 @@ be unseekable.
 Take a look at the full help message to learn about other command line options:
 
 ```bash
-./chromecastplay.py -h
+poetry run ./chromecastplay.py -h
 ```
 
 
