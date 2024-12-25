@@ -30,7 +30,7 @@ def to_webvtt(sub_file, video_file=None):
                             '-y', '-nostdin'] +
                            (['-sub_charenc', encoding] if encoding else []) +
                            ['-i', sub_file or video_file,
-                            '-map', '0:s:1',
+                            '-map', 's?',
                             '-f', 'webvtt',
                             '-loglevel', 'error',
                             '-'],
